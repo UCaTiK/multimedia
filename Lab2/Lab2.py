@@ -48,47 +48,89 @@ def blur(matrix, n=1, a=0.5):
 	return new_matrix
 
 
-cap = cv2.VideoCapture('video(10sec).mp4')
-frameCount = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-frameWidth = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-frameHeight = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-fps = cap.get(cv2.CAP_PROP_FPS)
+def video_modify(video):
+	cap = cv2.VideoCapture(video)
+	frameCount = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+	frameWidth = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+	frameHeight = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+	fps = cap.get(cv2.CAP_PROP_FPS)
+	
+	fourcc = cv2.VideoWriter_fourcc(*'XVID')
+	out = cv2.VideoWriter('output.mp4', fourcc, fps, (frameWidth,frameHeight))
+	
+	buf = np.empty((frameCount, frameHeight, frameWidth, 3), np.dtype('uint8'))
+	new_buf = np.empty((frameCount, frameHeight, frameWidth, 3), np.dtype('uint8'))
+	
+	fc = 0
+	ret = True
+	
+	while (fc < frameCount  and ret):
+		ret, buf[fc] = cap.read()
+		fc += 1
+	
+	blur_counter = 0
+	third_part = len(new_buf) / 3
+	for i in range(len(buf)):
+		print(f"Frame {i + 1}/{len(new_buf)}")
+		if i < third_part:
+			new_buf[i] = brightness(buf[i], 255 - (i * 5))
+		elif i < third_part * 2:
+			new_buf[i] = negative(buf[i])
+		else:
+			new_buf[i] = blur(buf[i], 3, blur_counter / third_part)
+			blur_counter += 1
+	
+	for frame in new_buf:
+		out.write(frame)
+	
+	cap.release()
+	out.release()
+	
+	cv2.destroyAllWindows()
 
-fourcc = cv2.VideoWriter_fourcc(*'XVID')
-out = cv2.VideoWriter('output.mp4', fourcc, fps, (frameWidth,frameHeight))
 
-buf = np.empty((frameCount, frameHeight, frameWidth, 3), np.dtype('uint8'))
-new_buf = np.empty((frameCount, frameHeight, frameWidth, 3), np.dtype('uint8'))
+def transition(video1, video2):
+	cap1 = cv2.VideoCapture(video1)
+	cap2 = cv2.VideoCapture(video2)
+	frameCount1 = int(cap1.get(cv2.CAP_PROP_FRAME_COUNT))
+	frameCount2 = int(cap2.get(cv2.CAP_PROP_FRAME_COUNT))
+	frameWidth = int(cap1.get(cv2.CAP_PROP_FRAME_WIDTH))
+	frameHeight = int(cap1.get(cv2.CAP_PROP_FRAME_HEIGHT))
+	fps = cap1.get(cv2.CAP_PROP_FPS)
+	
+	fourcc = cv2.VideoWriter_fourcc(*'XVID')
+	out = cv2.VideoWriter('transition_output.mp4', fourcc, fps, (frameWidth, frameHeight))
+	
+	buf1 = np.empty((frameCount1, frameHeight, frameWidth, 3), np.dtype('uint8'))
+	buf2 = np.empty((frameCount2, frameHeight, frameWidth, 3), np.dtype('uint8'))
+	
+	fc1 = 0
+	ret1 = True
+	while (fc1 < frameCount1 and ret1):
+		ret1, buf1[fc1] = cap1.read()
+		fc1 += 1
 
-fc = 0
-ret = True
+	fc2 = 0
+	ret2 = True
+	while (fc2 < frameCount2 and ret2):
+		ret2, buf2[fc2] = cap2.read()
+		fc2 += 1
 
-while (fc < frameCount  and ret):
-	ret, buf[fc] = cap.read()
-	fc += 1
+	transition_frames = min(frameCount1, frameCount2)
+	for i in range(transition_frames):
+		print(f"Frame {i + 1}/{transition_frames}")
+		transition_frame = np.zeros((frameHeight, frameWidth, 3), np.uint8)
+		transition_frame[:, :int(frameWidth * (i / transition_frames))] = buf1[i][:, :int(frameWidth * (i / transition_frames))]
+		transition_frame[:, int(frameWidth * (i / transition_frames)):] = buf2[i][:, int(frameWidth * (i / transition_frames)):]
 
-blur_counter = 0
-third_part = len(new_buf) / 3
-for i in range(len(buf)):
-	print(f"Frame {i + 1}/{len(new_buf)}")
-	if i < third_part:
-		new_buf[i] = brightness(buf[i], 255 - (i * 5))
-	elif i < third_part * 2:
-		new_buf[i] = negative(buf[i])
-	else:
-		new_buf[i] = blur(buf[i], 3, blur_counter / third_part)
-		blur_counter += 1
+		out.write(transition_frame)
 
-for frame in new_buf:
-	out.write(frame)
+	cap1.release()
+	cap2.release()
+	out.release()
 
-cap.release()
+	cv2.destroyAllWindows()
 
-out.release()
 
-cv2.destroyAllWindows()
-
-# cv2.namedWindow('frame 10')
-# cv2.imshow('frame 10', new_buf[0])
-#
-# cv2.waitKey(0)
+#video_modify("video(10sec).mp4")
+transition("video(10sec).mp4", "video2.mp4")
