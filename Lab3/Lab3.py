@@ -1,64 +1,75 @@
+import wave
 import numpy as np
-from pydub import AudioSegment
-from scipy.interpolate import interp1d
 
+def read_wave_file(filename):
+	with wave.open(filename, 'rb') as wf:
+		params = wf.getparams()
+		frames = wf.readframes(params.nframes)
+		audio_data = np.frombuffer(frames, dtype=np.int16)
+		return params, audio_data
 
-def load_audio(file_path):
-	audio = AudioSegment.from_mp3(file_path)
-	samples = np.array(audio.get_array_of_samples())
-	return audio.frame_rate, samples, audio.sample_width, audio.channels
+def write_wave_file(filename, params, audio_data):
+	with wave.open(filename, 'wb') as wf:
+		wf.setparams(params)
+		wf.writeframes(audio_data.tobytes())
 
+def stft(x, fft_size=1024, hop_size=512):
+	# Окно Ханнинга
+	window = np.hanning(fft_size)
+	return np.array([np.fft.rfft(window * x[i:i+fft_size]) for i in range(0, len(x)-fft_size, hop_size)])
 
-def save_audio(samples, frame_rate, sample_width, channels, file_path):
-	new_audio = AudioSegment(
-		samples.tobytes(),
-		frame_rate=frame_rate,
-		sample_width=sample_width,
-		channels=channels
-	)
-	new_audio.export(file_path, format="mp3")
+def istft(X, fft_size=1024, hop_size=512):
+	window = np.hanning(fft_size)
+	x = np.zeros(hop_size * (X.shape[0] + 1))
+	for n, i in enumerate(range(0, len(x)-fft_size, hop_size)):
+		x[i:i+fft_size] += np.fft.irfft(X[n]).real * window
+	return x
 
-
-def speed_up(samples, factor):
-	speeded_samples = []
-
-	index = 0.0
-	while index < len(samples):
-		speeded_samples.append(samples[int(index)])
-		index += factor
-
-	return np.array(speeded_samples, dtype=samples.dtype)
-
-
-def restore_audio(speeded_up_samples, original_length):
-	indices = np.linspace(0, len(speeded_up_samples) - 1, original_length)
-	interpolator = interp1d(np.arange(len(speeded_up_samples)), speeded_up_samples, kind='linear')
-	return interpolator(indices).astype(speeded_up_samples.dtype)
-
-
-def main(filename, speed_factor):
-	input_file = f'{filename}.mp3'
-	speeded_file = f'{filename}_speeded_{speed_factor}.mp3'
-	file_restored_1 = f'{filename}_restored_1.mp3'
-	file_restored_2 = f'{filename}_restored_2.mp3'
+def phase_vocoder(X, rate):
+	num_bins = X.shape[1]
+	num_frames = X.shape[0]
+	time_steps = np.arange(0, num_frames, rate)
+	X_phases = np.angle(X)
+	X_magnitudes = np.abs(X)
 	
-	# Подгрузка аудиофайла
-	frame_rate, samples, sample_width, channels = load_audio(input_file)
+	Y = np.zeros((len(time_steps), num_bins), dtype=np.complex_)
+	phase_accumulator = np.zeros(num_bins)
+	previous_phase = X_phases[0]
 	
-	# Ускорение аудиофайла
-	speeded_samples = speed_up(samples, speed_factor)
-	save_audio(speeded_samples, frame_rate, sample_width, channels, speeded_file)
+	for i, step in enumerate(time_steps):
+		current_frame = int(step) % num_frames
+		current_phase = X_phases[current_frame]
+		phase_difference = current_phase - previous_phase
+		phase_difference -= np.round(phase_difference / (2 * np.pi)) * (2 * np.pi)
+		phase_accumulator += phase_difference
+		Y[i] = X_magnitudes[current_frame] * np.exp(1j * phase_accumulator)
+		previous_phase = current_phase
 	
-	# Возвращение исходного файла с помощью замедления
-	speeded_samples = speed_up(speeded_samples, 1 / speed_factor)
-	save_audio(speeded_samples, frame_rate, sample_width, channels, file_restored_1)
-	
-	# Возвращение исходного файла с помощью интерполяции
-	restored_samples = restore_audio(speeded_samples, len(samples))
-	save_audio(restored_samples, frame_rate, sample_width, channels, file_restored_2)
+	return Y
 
+def change_pitch(input_file, output_file, semitone_shift):
+	params, audio_data = read_wave_file(input_file)
+	
+	# Преобразование Фурье
+	X = stft(audio_data)
+	
+	# Меняем pitch
+	pitch_shift_rate = 2 ** (semitone_shift / 12)
+	Y = phase_vocoder(X, 1 / pitch_shift_rate)
+	
+	# Обратное преобразование Фурье
+	y = istft(Y)
+	
+	# Интерпляция для изменения длины аудио до изначальной
+	y = np.interp(np.linspace(0, len(y), len(audio_data)), np.arange(len(y)), y)
+	
+	y = np.int16(y / np.max(np.abs(y)) * 32767)
+	
+	write_wave_file(output_file, params, y)
 
-if __name__ == "__main__":
-	main("music", 2)
-	main("music", 3)
-	main("music", 1.5)
+# Usage
+input_file = 'sample.wav'
+semitone_shift = 5  # полутона
+output_file = f'output_pitch_shifted_{semitone_shift}.wav'
+
+change_pitch(input_file, output_file, semitone_shift)
