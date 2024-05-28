@@ -67,7 +67,6 @@ def change_pitch(input_file, output_file, semitone_shift):
 	
 	write_wave_file(output_file, params, y)
 
-# Usage
 input_file = 'sample.wav'
 semitone_shift = 5  # полутона
 output_file = f'output_pitch_shifted_{semitone_shift}.wav'
